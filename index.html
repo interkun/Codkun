@@ -42,15 +42,30 @@
             --text-dark: #202124;
             --border-color: #dadce0;
         }
-        body { background-color: var(--bg-main); color: var(--text-dark); font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        header { background-color: var(--bg-main); z-index: 50; display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        footer { background-color: var(--bg-panel); z-index: 50; border-top: 1px solid var(--border-color); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; }
-        #app-root { flex: 1; display: flex; position: relative; overflow: hidden; background: #fff; }
+        /* Mobile Height Fixes */
+        body { 
+            background-color: var(--bg-main); 
+            color: var(--text-dark); 
+            font-family: 'Segoe UI', system-ui, sans-serif; 
+            height: 100dvh; /* Changed to dvh for mobile address bar fix */
+            max-height: 100dvh;
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+        }
+        header { flex-shrink: 0; background-color: var(--bg-main); z-index: 50; display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        
+        /* Ensure app-root doesn't push footer down */
+        #app-root { flex: 1; display: flex; position: relative; overflow: hidden; min-height: 0; background: #fff; }
+        
+        /* Footer locked to bottom */
+        footer { flex-shrink: 0; background-color: var(--bg-panel); z-index: 50; border-top: 1px solid var(--border-color); padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); display: flex; justify-content: space-between; align-items: center; }
+        
         #sidebar { position: absolute; left: -290px; top: 0; bottom: 0; width: 290px; background: var(--bg-main); z-index: 60; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
         #sidebar.open { left: 0; }
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); z-index: 55; display: none; backdrop-filter: blur(1px); }
         #overlay.active { display: block; }
-        #headerTabs { display: flex; overflow-x: auto; background: var(--bg-main); border-bottom: 1px solid var(--border-color); border-top: 1px solid var(--border-color); margin-top: -1px; }
+        #headerTabs { flex-shrink: 0; display: flex; overflow-x: auto; background: var(--bg-main); border-bottom: 1px solid var(--border-color); border-top: 1px solid var(--border-color); margin-top: -1px; }
         .h-tab { padding: 8px 16px; font-size: 13px; color: #5f6368; border-right: 1px solid var(--border-color); cursor: pointer; white-space: nowrap; transition: 0.2s; background: #f1f3f4; }
         .h-tab:hover { background: #e8eaed; color: var(--text-dark); }
         .h-tab.active { background: var(--bg-main); color: var(--primary); border-top: 3px solid var(--primary); border-bottom: 1px solid var(--bg-main); font-weight: bold; }
@@ -83,6 +98,9 @@
         <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
             <h2 class="font-bold text-xs text-gray-600 tracking-wider">PROJECT EXPLORER</h2>
             <div class="flex gap-1">
+                <button class="icon-btn text-sm text-gray-600 hover:text-green-600" id="importFolderBtn" title="Import Folder/Files"><i class="fas fa-file-import"></i></button>
+                <input type="file" id="folderUploader" webkitdirectory directory multiple class="hidden">
+                
                 <button class="icon-btn text-sm text-gray-600 hover:text-blue-600" id="newFileBtn" title="New File"><i class="fas fa-file-circle-plus"></i></button>
                 <button class="icon-btn text-sm text-gray-600 hover:text-blue-600" id="newFolderBtn" title="New Folder"><i class="fas fa-folder-plus"></i></button>
             </div>
