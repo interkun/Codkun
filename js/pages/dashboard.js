@@ -1,6 +1,6 @@
 /**
  * js/pages/dashboard.js
- * ULTIMATE FIX: Advanced Path Resolution, Deep Nesting, ES6 Module Support, Android Import Clean
+ * ULTIMATE FIX: Zero-Hang Compiler, Clean Android Imports, Find Next Fix, Delete Fix
  */
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -12,13 +12,12 @@ let currentFile = 'index.html';
 let searchCursor = null;
 
 // ==========================================
-// 1. INITIALIZATION & UI SETUP
+// 1. INITIALIZATION & SCROLL FIX
 // ==========================================
 export async function init(user, db) {
     currentUser = user;
     currentDb = db;
     
-    // Initialize CodeMirror
     editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
         lineNumbers: true,
         theme: 'default',
@@ -31,7 +30,6 @@ export async function init(user, db) {
         lint: true 
     });
 
-    // Mobile scroll fix
     setTimeout(() => {
         editor.setSize("100%", "100%");
         const cmScroll = document.querySelector('.CodeMirror-scroll');
@@ -61,19 +59,16 @@ async function loadUserWorkspace() {
         if (docSnap.exists() && docSnap.data().files) {
             fileSystem = docSnap.data().files;
         } else {
-            // Default setup showcasing deep nesting
             fileSystem = {
-                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="./css/main.css">\n</head>\n<body>\n  <h1>App Root 🚀</h1>\n  <script type="module" src="./js/app.js"><\/script>\n</body>\n</html>' },
-                'css/main.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; font-family: sans-serif; }' },
-                'js/app.js': { mode: 'javascript', content: 'import { sayHello } from "./utils/helpers.js";\nsayHello();\nconsole.log("App Loaded!");' },
-                'js/utils/helpers.js': { mode: 'javascript', content: 'export function sayHello() {\n  console.log("Hello from nested helper!");\n}' }
+                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Welcome! 🚀</h1>\n  <script src="script.js"><\/script>\n</body>\n</html>' },
+                'style.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; }' },
+                'script.js': { mode: 'javascript', content: 'console.log("Console loaded!");' }
             };
             saveToCloud();
         }
         
         loadIntoEditor(Object.keys(fileSystem)[0] || 'index.html');
         renderSidebarTree();
-        
     } catch (error) {
         console.error("Error loading workspace:", error);
     }
@@ -86,7 +81,7 @@ async function saveToCloud() {
         saveIndicator.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Saving...';
     }
     try {
-        // Direct overwrite to ensure deleted files stay deleted
+        // { merge: true } REMOVED. This ensures deleted files are removed from DB too.
         await setDoc(doc(currentDb, "workspaces", currentUser.uid), { files: fileSystem });
         if(saveIndicator) {
             saveIndicator.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Saved';
@@ -101,7 +96,7 @@ async function saveToCloud() {
 // 3. EDITOR, IMPORT & CREATION LOGIC
 // ==========================================
 function loadIntoEditor(filepath) {
-    if(!fileSystem[filepath]) return;
+    if(!fileSystem[filepath]) return; 
     currentFile = filepath;
     const fileData = fileSystem[filepath];
     
@@ -124,10 +119,12 @@ function setupEditorListeners() {
         }
     });
 
-    document.getElementById('newFileBtn').onclick = () => createNewItem('file', '');
-    document.getElementById('newFolderBtn').onclick = () => createNewItem('folder', '');
+    const newFileBtn = document.getElementById('newFileBtn');
+    if(newFileBtn) newFileBtn.onclick = () => createNewItem('file', '');
+    
+    const newFolderBtn = document.getElementById('newFolderBtn');
+    if(newFolderBtn) newFolderBtn.onclick = () => createNewItem('folder', '');
 
-    // Advanced Import (Fixes Android Paths)
     const importBtn = document.getElementById('importFolderBtn');
     const folderUploader = document.getElementById('folderUploader');
     
@@ -138,35 +135,29 @@ function setupEditorListeners() {
             if(files.length === 0) return;
 
             for(let file of files) {
-                let fullPath = file.webkitRelativePath || file.name; 
-                fullPath = fullPath.replace(/\\/g, '/'); 
-
-                // --- ANDROID PATH CLEANER ---
-                const garbagePaths = ['tree', 'document'];
-                let pathParts = fullPath.split('/');
-                let isAndroidJunk = garbagePaths.some(junk => pathParts.includes(junk)) || pathParts.some(p => p.includes('primary:'));
-                
-                if (isAndroidJunk) {
-                    try {
-                        let decoded = decodeURIComponent(fullPath);
-                        let decodedParts = decoded.split('/');
-                        let filteredParts = decodedParts.filter(part => !part.includes('primary:') && !garbagePaths.includes(part));
-                        fullPath = filteredParts.join('/') || file.name;
-                    } catch (err) {
-                        console.error("Decode error", err);
-                    }
+                let rawPath = file.webkitRelativePath || file.name; 
+                let decodedPath;
+                try {
+                    decodedPath = decodeURIComponent(rawPath);
+                } catch(err) {
+                    decodedPath = rawPath;
                 }
-                // ----------------------------
 
-                // Determine file type
+                // FIX: CLEAN ANDROID JUNK PATHS
+                let pathParts = decodedPath.replace(/\\/g, '/').split('/');
+                let cleanParts = pathParts.filter(p => !p.includes('primary:') && p !== 'tree' && p !== 'document' && p !== '');
+                
+                if(cleanParts.length === 0) continue;
+                let fullPath = cleanParts.join('/');
+
                 let mode = 'htmlmixed';
                 if(fullPath.endsWith('.js')) mode = 'javascript';
                 else if(fullPath.endsWith('.css')) mode = 'css';
-                else if(fullPath.endsWith('.json')) mode = 'javascript'; // Treat JSON as JS for editor
+                else if(fullPath.endsWith('.json')) mode = 'javascript';
 
-                if (!fullPath.match(/\.(jpg|jpeg|png|gif|ico|svg)$/i)) {
+                if (!fullPath.match(/\.(jpg|jpeg|png|gif|ico|svg|webp)$/i)) {
                     const text = await file.text();
-                    fileSystem[fullPath] = { mode, content: text }; 
+                    fileSystem[fullPath] = { mode, content: text };
                 } else {
                     const base64 = await new Promise((resolve) => {
                         const reader = new FileReader();
@@ -178,12 +169,11 @@ function setupEditorListeners() {
             }
             saveToCloud();
             renderSidebarTree();
-            alert(`Imported ${files.length} items successfully!`);
+            alert(`Imported ${files.length} files cleanly!`);
             folderUploader.value = ''; 
         };
     }
 
-    // Bottom Tools
     const selectAllBtn = document.getElementById('selectAllBtn');
     if(selectAllBtn) selectAllBtn.onclick = () => { editor.execCommand("selectAll"); editor.focus(); };
     
@@ -198,30 +188,8 @@ function setupEditorListeners() {
     
     const beautifyBtn = document.getElementById('beautifyBtn');
     if(beautifyBtn) beautifyBtn.onclick = () => format();
-
-    // Image Inserter
-    const uploadImageBtn = document.getElementById('uploadImageBtn');
-    const imageUploader = document.getElementById('imageUploader');
-    if(uploadImageBtn && imageUploader) {
-        uploadImageBtn.onclick = () => imageUploader.click();
-        imageUploader.onchange = async (e) => {
-            const file = e.target.files[0];
-            if(!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const base64Data = event.target.result;
-                let insertionCode = `<img src="${base64Data}" alt="${file.name}">`;
-                if(currentFile.endsWith('.css')) insertionCode = `url('${base64Data}')`;
-                editor.replaceSelection(insertionCode);
-                saveToCloud(); 
-            };
-            reader.readAsDataURL(file);
-            imageUploader.value = '';
-        };
-    }
 }
 
-// Universal Item Creator
 function createNewItem(type, basePath = "") {
     let promptMsg = type === 'folder' ? "Folder Name:" : "File Name (e.g., app.js):";
     let name = prompt(basePath ? `Create inside '${basePath}'\n${promptMsg}` : promptMsg);
@@ -357,7 +325,7 @@ function renderSidebarTree() {
                 
                 div.querySelector('.rename-btn').onclick = (e) => {
                     e.stopPropagation();
-                    let newPath = prompt("Edit path to Move/Rename (e.g. 'folder/app.js' or 'newname.js'):", node.path);
+                    let newPath = prompt("Edit path to Move/Rename (e.g. 'Folder/app.js' or 'newname.js'):", node.path);
                     if(newPath && newPath !== node.path) {
                         if(fileSystem[newPath]) return alert("File already exists at this path!");
                         fileSystem[newPath] = fileSystem[node.path];
@@ -389,7 +357,7 @@ function renderSidebarTree() {
 }
 
 // ==========================================
-// 5. FIND & REPLACE
+// 5. FIND & REPLACE (FIXED ITERATOR)
 // ==========================================
 export function toggleSearch() {
     const searchBar = document.getElementById('floating-search-bar');
@@ -410,11 +378,19 @@ function setupSearchAndButtons() {
         const query = findInput.value;
         if(!query) return;
         
-        if(!searchCursor || searchCursor.query !== query) searchCursor = editor.getSearchCursor(query);
+        // Agar cursor null hai ya word change hua hai, toh naya cursor banao
+        if(!searchCursor || searchCursor.query !== query) {
+            searchCursor = editor.getSearchCursor(query);
+            searchCursor.query = query; // custom tag to remember what we are searching
+        }
         
+        // Aage (ya peeche) dhundo
         let found = reverse ? searchCursor.findPrevious() : searchCursor.findNext();
+        
+        // Agar end tak pahuch gaya, toh shuru se wapas dhundo (Wrap around)
         if(!found) {
             searchCursor = editor.getSearchCursor(query); 
+            searchCursor.query = query;
             found = reverse ? searchCursor.findPrevious() : searchCursor.findNext();
         }
         
@@ -422,6 +398,8 @@ function setupSearchAndButtons() {
             editor.setSelection(searchCursor.from(), searchCursor.to());
             editor.scrollIntoView({from: searchCursor.from(), to: searchCursor.to()}, 100);
             editor.focus();
+        } else {
+            alert("No matches found.");
         }
     }
 
@@ -431,10 +409,11 @@ function setupSearchAndButtons() {
     
     if(findNextBtn) findNextBtn.onclick = () => performSearch(false);
     if(findPrevBtn) findPrevBtn.onclick = () => performSearch(true);
+    
     if(replaceBtn) replaceBtn.onclick = () => {
         if(searchCursor && searchCursor.from() && replaceInput) {
             searchCursor.replace(replaceInput.value);
-            performSearch(false); // Move to next after replace
+            performSearch(false); // replace karne ke baad automatic aage badho
         }
     };
     
@@ -445,13 +424,12 @@ function setupSearchAndButtons() {
     if(searchToggleBtn) searchToggleBtn.onclick = toggleSearch;
 
     const closePreviewBtn = document.getElementById('closePreviewBtn');
-    const previewNewWindowBtn = document.getElementById('previewNewWindowBtn');
-    
     if(closePreviewBtn) closePreviewBtn.onclick = () => document.getElementById('fullscreen-preview').classList.add('hidden');
     
+    const previewNewWindowBtn = document.getElementById('previewNewWindowBtn');
     if(previewNewWindowBtn) {
-        previewNewWindowBtn.onclick = async () => {
-            const finalCode = await compileApp(currentFile);
+        previewNewWindowBtn.onclick = () => {
+            const finalCode = getCompiledCode();
             const newWindow = window.open('', '_blank');
             newWindow.document.open();
             newWindow.document.write(finalCode);
@@ -462,7 +440,7 @@ function setupSearchAndButtons() {
 }
 
 // ==========================================
-// 6. EXPORTS (Formatter, Undo, Redo)
+// 6. EXPORTS & COMPILER (Zero-Hang)
 // ==========================================
 export function undo() { editor.undo(); }
 export function redo() { editor.redo(); }
@@ -476,148 +454,68 @@ export function format() {
     } catch(e) {}
 }
 
-// ==========================================
-// 7. ADVANCED COMPILER (Blob URLs for Deep Nesting & ES6 Modules)
-// ==========================================
-/**
- * Resolves relative paths (./, ../, or flat) based on the current file's directory.
- */
-function resolvePath(basePath, relativePath) {
-    if (relativePath.startsWith('http') || relative.startsWith('data:')) return relativePath;
-
-    // Get the directory of the base file (e.g., "app/pages/home.html" -> "app/pages/")
-    const baseDir = basePath.substring(0, basePath.lastIndexOf('/') + 1);
-    
-    // Split paths into arrays
-    const baseParts = baseDir.split('/').filter(p => p);
-    const relParts = relativePath.split('/').filter(p => p);
-
-    for (let part of relParts) {
-        if (part === '.') continue; // Current dir, do nothing
-        if (part === '..') {
-            baseParts.pop(); // Go up one level
-        } else {
-            baseParts.push(part); // Go down one level
-        }
-    }
-
-    const resolved = baseParts.join('/');
-    
-    // Check if the exact resolved path exists
-    if(fileSystem[resolved]) return resolved;
-    
-    // Fallback: If not found, try looking for the file globally (in case user just wrote "style.css" instead of "./style.css")
-    const flatName = relativePath.split('/').pop();
-    const possiblePaths = Object.keys(fileSystem).filter(k => k.endsWith('/' + flatName) || k === flatName);
-    
-    if(possiblePaths.length > 0) return possiblePaths[0]; // Return the first match
-
-    return relativePath; // Return original if we can't resolve it
-}
-
-/**
- * Compiles the app using Blob URLs to support complex nesting and ES6 Modules
- */
-async function compileApp(entryPointFile) {
-    let pathParts = entryPointFile.split('/');
+function getCompiledCode() {
+    // FOLDER AS AN APP LOGIC
+    let pathParts = currentFile.split('/');
     let targetIndex = 'index.html'; 
     
-    // Find the closest index.html
     if (pathParts.length > 1) {
         let folderPath = pathParts.slice(0, pathParts.length - 1).join('/');
         let folderIndex = `${folderPath}/index.html`;
-        if (fileSystem[folderIndex]) targetIndex = folderIndex; 
-    }
-
-    if (!fileSystem[targetIndex]) {
-        return `<h1>Error 404</h1><p>No index.html found in the root or current folder to act as an entry point.</p>`;
-    }
-
-    // Step 1: Create Blob URLs for ALL files in the system
-    const blobUrlMap = {};
-    for (const [filepath, fileData] of Object.entries(fileSystem)) {
-        if (filepath.endsWith('.keep')) continue;
-
-        let mimeType = 'text/plain';
-        if (filepath.endsWith('.html')) mimeType = 'text/html';
-        else if (filepath.endsWith('.js') || filepath.endsWith('.json')) mimeType = 'application/javascript';
-        else if (filepath.endsWith('.css')) mimeType = 'text/css';
-        else if (fileData.mode === 'image') mimeType = 'image/png'; // Assuming PNG if from base64 string
-
-        let blobContent;
-        if (fileData.mode === 'image') {
-            // Convert base64 back to Blob
-            const res = await fetch(fileData.content);
-            blobContent = await res.blob();
-        } else {
-            // For JS files, we need to recursively process their imports BEFORE creating the blob
-            let processedContent = fileData.content;
-            if (filepath.endsWith('.js')) {
-                // Regex to find ES6 imports: import { x } from "./utils.js";
-                const importRegex = /from\s+(['"])([^'"]+)\1/g;
-                processedContent = processedContent.replace(importRegex, (match, quote, path) => {
-                     const resolved = resolvePath(filepath, path);
-                     // We use a placeholder here and will replace it after all blobs are generated
-                     return `from ${quote}BLOB_PLACEHOLDER_${resolved}${quote}`;
-                });
-            }
-            blobContent = new Blob([processedContent], { type: mimeType });
+        if (fileSystem[folderIndex]) {
+            targetIndex = folderIndex; 
         }
-
-        blobUrlMap[filepath] = URL.createObjectURL(blobContent);
     }
 
-    // Step 2: Fix JS Import placeholders (Because JS files might import other JS files)
-    // To do this perfectly, we'd need a topological sort, but a simple multi-pass usually works for small apps.
-    // For now, let's focus on HTML replacement as it's the primary entry.
-
-    // Step 3: Process the main HTML file
-    let htmlCode = fileSystem[targetIndex].content;
-
-    // Inject Eruda
+    let htmlCode = fileSystem[targetIndex] ? fileSystem[targetIndex].content : `<h1>Error 404</h1><p>No ${targetIndex} found! Is folder me index.html create karo.</p>`;
+    
+    // Inject Eruda Console
     const erudaScript = `<script src="https://cdn.jsdelivr.net/npm/eruda"><\/script><script>eruda.init();<\/script>`;
     if (htmlCode.includes('</head>')) htmlCode = htmlCode.replace('</head>', erudaScript + '</head>');
     else htmlCode = erudaScript + htmlCode;
 
-    // Replace all src, href, and url() paths in the HTML
-    const pathRegex = /(src|href|url)\s*(=|\()\s*(['"]?)([^'"\s\)]+)\3\s*\)?/gi;
-    
-    htmlCode = htmlCode.replace(pathRegex, (match, attr, operator, quote, path) => {
-        // Ignore external links and data URIs
-        if (path.startsWith('http') || path.startsWith('data:') || path.startsWith('blob:')) return match;
+    // INLINE INJECTION (Fastest and 100% stable)
+    Object.keys(fileSystem).forEach(fname => {
+        const shortName = fname.split('/').pop(); 
 
-        const resolvedPath = resolvePath(targetIndex, path);
-        
-        if (blobUrlMap[resolvedPath]) {
-            if (operator === '(') {
-                 return `url(${quote}${blobUrlMap[resolvedPath]}${quote})`;
-            }
-            return `${attr}=${quote}${blobUrlMap[resolvedPath]}${quote}`;
+        if(fname.endsWith('.css')) {
+            htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']([^"']*)${shortName}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
         }
-        return match; // Leave untouched if not found
+        if(fname.endsWith('.js') && !fname.endsWith('.json')) {
+            const regex = new RegExp(`<script[^>]*src=["']([^"']*)${shortName}["'][^>]*><\\/script>`, 'gi');
+            
+            // Check if user is using ES6 modules (type="module")
+            if(htmlCode.match(regex)) {
+                const matchStr = htmlCode.match(regex)[0];
+                if(matchStr.includes('type="module"')) {
+                    htmlCode = htmlCode.replace(regex, `<script type="module">${fileSystem[fname].content}<\/script>`);
+                } else {
+                    htmlCode = htmlCode.replace(regex, `<script>${fileSystem[fname].content}<\/script>`);
+                }
+            }
+        }
+        if(fileSystem[fname].mode === 'image') {
+            const regex = new RegExp(`(src|href)=["']([^"']*)${shortName}["']`, 'gi');
+            htmlCode = htmlCode.replace(regex, `$1="${fileSystem[fname].content}"`);
+        }
     });
-
+    
     return htmlCode;
 }
 
-export async function run() {
+export function run() {
     const previewContainer = document.getElementById('fullscreen-preview');
     if(previewContainer) {
         previewContainer.classList.remove('hidden');
-        
-        // Change button to show loading state if compilation takes time
-        const frame = document.getElementById('preview-iframe');
-        if(frame) {
-            const doc = frame.contentDocument || frame.contentWindow.document;
-            doc.open(); 
-            doc.write("<h2>Loading App...</h2>"); 
-            doc.close();
-
-            const finalCode = await compileApp(currentFile);
-            
-            doc.open(); 
-            doc.write(finalCode); 
-            doc.close();
+        try {
+            const finalCode = getCompiledCode();
+            const frame = document.getElementById('preview-iframe');
+            if(frame) {
+                const doc = frame.contentDocument || frame.contentWindow.document;
+                doc.open(); doc.write(finalCode); doc.close();
+            }
+        } catch (e) {
+            console.error("Compile error", e);
         }
     }
 }
