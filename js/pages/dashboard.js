@@ -1,6 +1,6 @@
 /**
  * js/pages/dashboard.js
- * Complete File: Infinite Nested Folders + Independent App Routing + Image Uploader + Bottom Tools
+ * COMPLETE FIX: Mobile Scroll, Firebase Delete Bug, Move Files, Import Folders
  */
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -18,7 +18,6 @@ export async function init(user, db) {
     currentUser = user;
     currentDb = db;
     
-    // CodeMirror Initialization (Linting Enabled)
     editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
         lineNumbers: true,
         theme: 'default',
@@ -31,7 +30,6 @@ export async function init(user, db) {
         lint: true 
     });
 
-    // SCROLLING FIX: Forcing CodeMirror to take full height and allow scroll
     setTimeout(() => {
         editor.setSize("100%", "100%");
         const cmScroll = document.querySelector('.CodeMirror-scroll');
@@ -40,7 +38,7 @@ export async function init(user, db) {
             cmScroll.style.overflowY = 'auto';
             cmScroll.style.overflowX = 'auto';
             cmCore.style.height = '100%';
-            cmCore.style.position = 'absolute'; // Fixes flexbox bug
+            cmCore.style.position = 'absolute'; 
         }
         editor.refresh();
     }, 100);
@@ -61,18 +59,16 @@ async function loadUserWorkspace() {
         if (docSnap.exists() && docSnap.data().files) {
             fileSystem = docSnap.data().files;
         } else {
-            // First time default files
             fileSystem = {
-                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Welcome to CloudWeaver! 🚀</h1>\n  <script src="script.js"><\/script>\n</body>\n</html>' },
-                'style.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; font-family: sans-serif; }' },
-                'script.js': { mode: 'javascript', content: 'console.log("Eruda console loaded!");' }
+                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Welcome! 🚀</h1>\n  <script src="script.js"><\/script>\n</body>\n</html>' },
+                'style.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; }' },
+                'script.js': { mode: 'javascript', content: 'console.log("Console loaded!");' }
             };
             saveToCloud();
         }
         
         loadIntoEditor(Object.keys(fileSystem)[0] || 'index.html');
         renderSidebarTree();
-        
     } catch (error) {
         console.error("Error loading workspace:", error);
     }
@@ -85,7 +81,8 @@ async function saveToCloud() {
         saveIndicator.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Saving...';
     }
     try {
-        await setDoc(doc(currentDb, "workspaces", currentUser.uid), { files: fileSystem }, { merge: true });
+        // BUG FIX: Removed { merge: true }. Overwriting the document ensures deleted files are actually removed from Firebase!
+        await setDoc(doc(currentDb, "workspaces", currentUser.uid), { files: fileSystem });
         if(saveIndicator) {
             saveIndicator.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Saved';
             setTimeout(() => saveIndicator.classList.add('hidden'), 2000);
@@ -96,9 +93,10 @@ async function saveToCloud() {
 }
 
 // ==========================================
-// 3. EDITOR & INFINITE CREATION LOGIC
+// 3. EDITOR, IMPORT & CREATION LOGIC
 // ==========================================
 function loadIntoEditor(filepath) {
+    if(!fileSystem[filepath]) return;
     currentFile = filepath;
     const fileData = fileSystem[filepath];
     
@@ -121,65 +119,85 @@ function setupEditorListeners() {
         }
     });
 
-    // Root Level Creation
-    const newFileBtn = document.getElementById('newFileBtn');
-    const newFolderBtn = document.getElementById('newFolderBtn');
-    if(newFileBtn) newFileBtn.onclick = () => createNewItem('file', '');
-    if(newFolderBtn) newFolderBtn.onclick = () => createNewItem('folder', '');
+    document.getElementById('newFileBtn').onclick = () => createNewItem('file', '');
+    document.getElementById('newFolderBtn').onclick = () => createNewItem('folder', '');
+
+    // Folder & File Import Logic
+    const importBtn = document.getElementById('importFolderBtn');
+    const folderUploader = document.getElementById('folderUploader');
+    
+    if(importBtn && folderUploader) {
+        importBtn.onclick = () => folderUploader.click();
+        folderUploader.onchange = async (e) => {
+            const files = e.target.files;
+            if(files.length === 0) return;
+
+            // Note: On some Android file managers, webkitRelativePath might be empty. It defaults to root if so.
+            for(let file of files) {
+                let fullPath = file.webkitRelativePath || file.name; 
+                fullPath = fullPath.replace(/\\/g, '/'); // Fix Windows slashes if any
+
+                let mode = 'htmlmixed';
+                if(fullPath.endsWith('.js')) mode = 'javascript';
+                if(fullPath.endsWith('.css')) mode = 'css';
+                if(fullPath.endsWith('.json')) mode = 'javascript';
+
+                // Check if text or image
+                if (!fullPath.match(/\.(jpg|jpeg|png|gif|ico|svg)$/i)) {
+                    const text = await file.text();
+                    fileSystem[fullPath] = { mode, content: text };
+                } else {
+                    // Store image as base64 inside system
+                    const base64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = ev => resolve(ev.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                    fileSystem[fullPath] = { mode: 'image', content: base64 };
+                }
+            }
+            saveToCloud();
+            renderSidebarTree();
+            alert(`Imported ${files.length} items successfully!`);
+            folderUploader.value = ''; // Reset
+        };
+    }
 
     // Bottom Toolbar Setup
-    const selectAllBtn = document.getElementById('selectAllBtn');
-    const copyBtn = document.getElementById('copyBtn');
-    const undoBtn = document.getElementById('undoBtn');
-    const redoBtn = document.getElementById('redoBtn');
-    const beautifyBtn = document.getElementById('beautifyBtn');
+    document.getElementById('selectAllBtn').onclick = () => { editor.execCommand("selectAll"); editor.focus(); };
+    document.getElementById('copyBtn').onclick = () => { navigator.clipboard.writeText(editor.getValue()); alert("Code Copied!"); };
+    document.getElementById('undoBtn').onclick = () => undo();
+    document.getElementById('redoBtn').onclick = () => redo();
+    document.getElementById('beautifyBtn').onclick = () => format();
 
-    if(selectAllBtn) selectAllBtn.onclick = () => { editor.execCommand("selectAll"); editor.focus(); };
-    if(copyBtn) copyBtn.onclick = () => { navigator.clipboard.writeText(editor.getValue()); alert("Code Copied!"); };
-    if(undoBtn) undoBtn.onclick = () => undo();
-    if(redoBtn) redoBtn.onclick = () => redo();
-    if(beautifyBtn) beautifyBtn.onclick = () => format();
-
-    // Image Uploader Setup
+    // Image Insert (Base64)
     const uploadBtn = document.getElementById('uploadImageBtn');
     const uploader = document.getElementById('imageUploader');
-    
     if(uploadBtn && uploader) {
         uploadBtn.onclick = () => uploader.click();
         uploader.onchange = async (e) => {
             const file = e.target.files[0];
             if(!file) return;
-
-            // TODO: Here you can later add AWS S3 upload logic
-            // For now, it inserts the image as a Base64 string directly into the editor
             const reader = new FileReader();
             reader.onload = (event) => {
                 const base64Data = event.target.result;
                 let insertionCode = `<img src="${base64Data}" alt="${file.name}">`;
-                
-                // If editing CSS, insert as background url
-                if(currentFile.endsWith('.css')) {
-                    insertionCode = `url('${base64Data}')`;
-                }
-                
+                if(currentFile.endsWith('.css')) insertionCode = `url('${base64Data}')`;
                 editor.replaceSelection(insertionCode);
-                saveToCloud(); // Save immediately after inserting huge base64
+                saveToCloud(); 
             };
             reader.readAsDataURL(file);
-            
-            // Reset input so the same file can be uploaded again if needed
             uploader.value = '';
         };
     }
 }
 
-// Universal Item Creator (Handles deep nesting)
 function createNewItem(type, basePath = "") {
     let promptMsg = type === 'folder' ? "Folder Name:" : "File Name (e.g., app.js):";
     let name = prompt(basePath ? `Create inside '${basePath}'\n${promptMsg}` : promptMsg);
     
     if (!name) return;
-    name = name.replace(/\//g, ''); // Prevent slashes in name
+    name = name.replace(/\//g, ''); 
     
     let fullPath = basePath ? `${basePath}/${name}` : name;
 
@@ -201,7 +219,7 @@ function createNewItem(type, basePath = "") {
 }
 
 // ==========================================
-// 4. INFINITE NESTED TREE VISUALIZER (Recursive Algorithm)
+// 4. INFINITE NESTED TREE VISUALIZER
 // ==========================================
 function renderTabs() {
     const tabsContainer = document.getElementById('headerTabs');
@@ -223,7 +241,6 @@ function renderSidebarTree() {
     if(!treeContainer) return;
     treeContainer.innerHTML = '';
     
-    // Step 1: Build a hierarchical object from flat paths
     const treeData = {};
     Object.keys(fileSystem).forEach(filepath => {
         const parts = filepath.split('/');
@@ -240,9 +257,7 @@ function renderSidebarTree() {
         }
     });
 
-    // Step 2: Recursive render function
     function createTreeNode(nodeObj, container) {
-        // Sort folders first, then files
         const keys = Object.keys(nodeObj).sort((a, b) => {
             const typeA = nodeObj[a].type;
             const typeB = nodeObj[b].type;
@@ -256,7 +271,6 @@ function renderSidebarTree() {
             
             if (node.type === 'folder') {
                 div.className = 'flex flex-col mt-1';
-                // Folder Header
                 const header = document.createElement('div');
                 header.className = 'flex justify-between items-center px-2 py-1.5 bg-gray-100 hover:bg-gray-200 rounded group cursor-pointer border-l-2 border-transparent hover:border-yellow-400';
                 header.innerHTML = `
@@ -264,11 +278,10 @@ function renderSidebarTree() {
                     <div class="hidden group-hover:flex gap-1">
                         <button class="text-gray-400 hover:text-blue-600 p-1" title="Add File"><i class="fas fa-file-medical"></i></button>
                         <button class="text-gray-400 hover:text-green-600 p-1" title="Add Folder"><i class="fas fa-folder-plus"></i></button>
-                        <button class="text-gray-400 hover:text-red-500 p-1" title="Delete Folder"><i class="fas fa-trash"></i></button>
+                        <button class="text-gray-400 hover:text-red-500 p-1" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 `;
                 
-                // Attach Folder Actions
                 const btns = header.querySelectorAll('button');
                 btns[0].onclick = (e) => { e.stopPropagation(); createNewItem('file', node.path); };
                 btns[1].onclick = (e) => { e.stopPropagation(); createNewItem('folder', node.path); };
@@ -276,48 +289,62 @@ function renderSidebarTree() {
                     e.stopPropagation();
                     if(confirm(`Delete folder '${node.name}' and EVERYTHING inside it?`)) {
                         Object.keys(fileSystem).forEach(p => {
-                            if(p.startsWith(node.path + '/')) delete fileSystem[p]; // Delete nested contents
+                            if(p.startsWith(node.path + '/')) delete fileSystem[p];
                         });
                         delete fileSystem[`${node.path}/.keep`];
                         saveToCloud();
                         renderSidebarTree();
-                        
-                        // Load fallback file if current deleted
                         const remaining = Object.keys(fileSystem).filter(k => !k.endsWith('.keep'));
                         if(!remaining.includes(currentFile) && remaining.length > 0) loadIntoEditor(remaining[0]);
                     }
                 };
                 
                 div.appendChild(header);
-
-                // Nested Children Container (Indented)
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'flex flex-col border-l border-gray-300 ml-3 pl-2 mt-1';
                 createTreeNode(node.children, childrenContainer);
                 div.appendChild(childrenContainer);
 
             } else {
-                // File Node
                 div.className = `flex justify-between items-center px-2 py-1.5 rounded cursor-pointer text-sm my-0.5 group ${node.path === currentFile ? 'bg-blue-50 text-blue-600 font-bold border-l-2 border-blue-500' : 'text-gray-700 hover:bg-gray-100 border-l-2 border-transparent'}`;
                 let icon = 'fa-html5 text-orange-500';
                 if(node.name.endsWith('.js')) icon = 'fa-js text-yellow-500';
                 if(node.name.endsWith('.css')) icon = 'fa-css3 text-blue-500';
 
+                // Added Edit Icon for Move/Rename
                 div.innerHTML = `
                     <span class="truncate"><i class="fab ${icon} w-5 text-center"></i> ${node.name}</span>
-                    <i class="fas fa-trash text-gray-300 hover:text-red-500 p-1 hidden group-hover:block"></i>
+                    <div class="hidden group-hover:flex gap-1 items-center">
+                        <i class="fas fa-edit text-gray-400 hover:text-blue-500 p-1 rename-btn" title="Rename/Move"></i>
+                        <i class="fas fa-trash text-gray-300 hover:text-red-500 p-1 del-btn" title="Delete"></i>
+                    </div>
                 `;
                 
                 div.onclick = () => { loadIntoEditor(node.path); document.getElementById('menuBtn').click(); };
                 
-                // Delete File
-                div.querySelector('.fa-trash').onclick = (e) => {
+                // Move/Rename Logic
+                div.querySelector('.rename-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    let newPath = prompt("Edit path to Move/Rename (e.g. 'Folder/app.js' or 'newname.js'):", node.path);
+                    if(newPath && newPath !== node.path) {
+                        if(fileSystem[newPath]) return alert("File already exists at this path!");
+                        fileSystem[newPath] = fileSystem[node.path];
+                        delete fileSystem[node.path];
+                        if(currentFile === node.path) currentFile = newPath;
+                        saveToCloud();
+                        renderSidebarTree();
+                        loadIntoEditor(currentFile);
+                    }
+                };
+
+                // Delete Logic
+                div.querySelector('.del-btn').onclick = (e) => {
                     e.stopPropagation();
                     if(Object.keys(fileSystem).filter(k => !k.endsWith('.keep')).length <= 1) return alert("Can't delete last file.");
                     if(confirm(`Delete ${node.name}?`)) {
                         delete fileSystem[node.path];
                         const remaining = Object.keys(fileSystem).filter(k => !k.endsWith('.keep'));
-                        if(remaining.length > 0) loadIntoEditor(remaining[0]);
+                        if(currentFile === node.path && remaining.length > 0) loadIntoEditor(remaining[0]);
                         renderSidebarTree();
                         saveToCloud();
                     }
@@ -327,20 +354,17 @@ function renderSidebarTree() {
         });
     }
 
-    // Start rendering from root
     createTreeNode(treeData, treeContainer);
 }
 
 // ==========================================
-// 5. FIND & REPLACE (Perfected)
+// 5. FIND & REPLACE
 // ==========================================
 export function toggleSearch() {
     const searchBar = document.getElementById('floating-search-bar');
     if(searchBar) {
         searchBar.classList.toggle('hidden');
-        if(!searchBar.classList.contains('hidden')) {
-            document.getElementById('findInput').focus();
-        }
+        if(!searchBar.classList.contains('hidden')) document.getElementById('findInput').focus();
     }
 }
 
@@ -352,15 +376,12 @@ function setupSearchAndButtons() {
         if(!findInput) return;
         const query = findInput.value;
         if(!query) return;
-        
         if(!searchCursor || searchCursor.query !== query) searchCursor = editor.getSearchCursor(query);
-        
         let found = reverse ? searchCursor.findPrevious() : searchCursor.findNext();
         if(!found) {
             searchCursor = editor.getSearchCursor(query); 
             found = reverse ? searchCursor.findPrevious() : searchCursor.findNext();
         }
-        
         if(found) {
             editor.setSelection(searchCursor.from(), searchCursor.to());
             editor.scrollIntoView({from: searchCursor.from(), to: searchCursor.to()}, 100);
@@ -371,8 +392,6 @@ function setupSearchAndButtons() {
     const findNextBtn = document.getElementById('findNext');
     const findPrevBtn = document.getElementById('findPrev');
     const replaceBtn = document.getElementById('replaceBtn');
-    const closeSearchBtn = document.getElementById('closeSearchBtn');
-    const searchToggleBtn = document.getElementById('searchToggleBtn');
     
     if(findNextBtn) findNextBtn.onclick = () => performSearch(false);
     if(findPrevBtn) findPrevBtn.onclick = () => performSearch(true);
@@ -382,84 +401,55 @@ function setupSearchAndButtons() {
             performSearch(false);
         }
     };
-    if(closeSearchBtn) closeSearchBtn.onclick = toggleSearch;
-    if(searchToggleBtn) searchToggleBtn.onclick = toggleSearch;
+    
+    document.getElementById('closeSearchBtn').onclick = toggleSearch;
+    document.getElementById('searchToggleBtn').onclick = toggleSearch;
 
-    // Preview Window Buttons
-    const closePreviewBtn = document.getElementById('closePreviewBtn');
-    const previewNewWindowBtn = document.getElementById('previewNewWindowBtn');
-    
-    if(closePreviewBtn) {
-        closePreviewBtn.onclick = () => {
-            document.getElementById('fullscreen-preview').classList.add('hidden');
-        };
-    }
-    
-    if(previewNewWindowBtn) {
-        previewNewWindowBtn.onclick = () => {
-            const finalCode = getCompiledCode();
-            const newWindow = window.open('', '_blank');
-            newWindow.document.open();
-            newWindow.document.write(finalCode);
-            newWindow.document.close();
-            newWindow.document.title = "CloudWeaver App";
-        };
-    }
+    document.getElementById('closePreviewBtn').onclick = () => document.getElementById('fullscreen-preview').classList.add('hidden');
+    document.getElementById('previewNewWindowBtn').onclick = () => {
+        const finalCode = getCompiledCode();
+        const newWindow = window.open('', '_blank');
+        newWindow.document.open(); newWindow.document.write(finalCode); newWindow.document.close();
+    };
 }
 
 // ==========================================
-// 6. EXPORTS (Format, Undo, Redo, Run)
+// 6. FORMATTER & COMPILER
 // ==========================================
 export function undo() { editor.undo(); }
 export function redo() { editor.redo(); }
-
 export function format() {
     const ext = currentFile.split('.').pop();
     try {
         if(ext === 'html') editor.setValue(html_beautify(editor.getValue(), { indent_size: 4 }));
         if(ext === 'css') editor.setValue(css_beautify(editor.getValue(), { indent_size: 4 }));
         if(ext === 'js' && ext !== 'json') editor.setValue(js_beautify(editor.getValue(), { indent_size: 4 }));
-    } catch(e) {
-        console.error("Formatting error:", e);
-    }
+    } catch(e) {}
 }
 
 function getCompiledCode() {
-    // FOLDER AS AN APP LOGIC
-    // Find out which folder the current file is in to set the root index.html
     let pathParts = currentFile.split('/');
-    let targetIndex = 'index.html'; // Default to root index.html
-    
+    let targetIndex = 'index.html'; 
     if (pathParts.length > 1) {
-        // We are inside a folder. Look for an index.html in THIS folder.
         let folderPath = pathParts.slice(0, pathParts.length - 1).join('/');
         let folderIndex = `${folderPath}/index.html`;
-        if (fileSystem[folderIndex]) {
-            targetIndex = folderIndex; // Make THIS folder the App Root
-        }
+        if (fileSystem[folderIndex]) targetIndex = folderIndex; 
     }
 
-    let htmlCode = fileSystem[targetIndex] ? fileSystem[targetIndex].content : `<h1>Error 404</h1><p>No ${targetIndex} found! Please create an index.html file to run this app.</p>`;
+    let htmlCode = fileSystem[targetIndex] ? fileSystem[targetIndex].content : `<h1>Error 404</h1><p>No ${targetIndex} found!</p>`;
     
-    // Inject Eruda Console
     const erudaScript = `<script src="https://cdn.jsdelivr.net/npm/eruda"><\/script><script>eruda.init();<\/script>`;
     if (htmlCode.includes('</head>')) htmlCode = htmlCode.replace('</head>', erudaScript + '</head>');
     else htmlCode = erudaScript + htmlCode;
 
-    // Combine resources dynamically based on linked files in the HTML
     Object.keys(fileSystem).forEach(fname => {
-        const shortName = fname.split('/').pop(); // "Folder/style.css" -> "style.css"
-        
+        const shortName = fname.split('/').pop(); 
         if(fname.endsWith('.css')) {
-            // Replace <link href="style.css"> with actual styles
             htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']${shortName}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
-            // Also support absolute paths <link href="Folder/style.css">
             htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']${fname}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
         }
         if(fname.endsWith('.js') && !fname.endsWith('.json')) {
-            // Replace <script src="script.js"> with actual scripts
             htmlCode = htmlCode.replace(new RegExp(`<script[^>]*src=["']${shortName}["'][^>]*><\\/script>`, 'gi'), `<script>${fileSystem[fname].content}<\/script>`);
-            // Also support absolute paths <script src="Folder/script.js">
             htmlCode = htmlCode.replace(new RegExp(`<script[^>]*src=["']${fname}["'][^>]*><\\/script>`, 'gi'), `<script>${fileSystem[fname].content}<\/script>`);
         }
     });
@@ -468,16 +458,7 @@ function getCompiledCode() {
 }
 
 export function run() {
-    const previewContainer = document.getElementById('fullscreen-preview');
-    if(previewContainer) {
-        previewContainer.classList.remove('hidden');
-        const finalCode = getCompiledCode();
-        const frame = document.getElementById('preview-iframe');
-        if(frame) {
-            const doc = frame.contentDocument || frame.contentWindow.document;
-            doc.open(); 
-            doc.write(finalCode); 
-            doc.close();
-        }
-    }
+    document.getElementById('fullscreen-preview').classList.remove('hidden');
+    const doc = document.getElementById('preview-iframe').contentWindow.document;
+    doc.open(); doc.write(getCompiledCode()); doc.close();
 }
