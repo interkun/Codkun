@@ -1,6 +1,6 @@
 /**
  * js/pages/dashboard.js
- * Infinite Nested Folders + Scrolling Fix + Eruda Console
+ * Complete File: Infinite Nested Folders + Independent App Routing + Image Uploader + Bottom Tools
  */
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -18,7 +18,7 @@ export async function init(user, db) {
     currentUser = user;
     currentDb = db;
     
-    // CodeMirror Initialization
+    // CodeMirror Initialization (Linting Enabled)
     editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
         lineNumbers: true,
         theme: 'default',
@@ -63,9 +63,9 @@ async function loadUserWorkspace() {
         } else {
             // First time default files
             fileSystem = {
-                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="css/style.css">\n</head>\n<body>\n  <h1>Infinite Folders Ready! 🚀</h1>\n  <script src="js/app.js"><\/script>\n</body>\n</html>' },
-                'css/style.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; }' },
-                'js/app.js': { mode: 'javascript', content: 'console.log("Eruda console loaded!");' }
+                'index.html': { mode: 'htmlmixed', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Welcome to CloudWeaver! 🚀</h1>\n  <script src="script.js"><\/script>\n</body>\n</html>' },
+                'style.css': { mode: 'css', content: 'body { text-align: center; padding: 20px; font-family: sans-serif; }' },
+                'script.js': { mode: 'javascript', content: 'console.log("Eruda console loaded!");' }
             };
             saveToCloud();
         }
@@ -122,11 +122,55 @@ function setupEditorListeners() {
     });
 
     // Root Level Creation
-    document.getElementById('newFileBtn').onclick = () => createNewItem('file', '');
-    document.getElementById('newFolderBtn').onclick = () => createNewItem('folder', '');
+    const newFileBtn = document.getElementById('newFileBtn');
+    const newFolderBtn = document.getElementById('newFolderBtn');
+    if(newFileBtn) newFileBtn.onclick = () => createNewItem('file', '');
+    if(newFolderBtn) newFolderBtn.onclick = () => createNewItem('folder', '');
 
-    document.getElementById('selectAllBtn').onclick = () => { editor.execCommand("selectAll"); editor.focus(); };
-    document.getElementById('copyBtn').onclick = () => { navigator.clipboard.writeText(editor.getValue()); alert("Code Copied!"); };
+    // Bottom Toolbar Setup
+    const selectAllBtn = document.getElementById('selectAllBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+    const beautifyBtn = document.getElementById('beautifyBtn');
+
+    if(selectAllBtn) selectAllBtn.onclick = () => { editor.execCommand("selectAll"); editor.focus(); };
+    if(copyBtn) copyBtn.onclick = () => { navigator.clipboard.writeText(editor.getValue()); alert("Code Copied!"); };
+    if(undoBtn) undoBtn.onclick = () => undo();
+    if(redoBtn) redoBtn.onclick = () => redo();
+    if(beautifyBtn) beautifyBtn.onclick = () => format();
+
+    // Image Uploader Setup
+    const uploadBtn = document.getElementById('uploadImageBtn');
+    const uploader = document.getElementById('imageUploader');
+    
+    if(uploadBtn && uploader) {
+        uploadBtn.onclick = () => uploader.click();
+        uploader.onchange = async (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
+
+            // TODO: Here you can later add AWS S3 upload logic
+            // For now, it inserts the image as a Base64 string directly into the editor
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const base64Data = event.target.result;
+                let insertionCode = `<img src="${base64Data}" alt="${file.name}">`;
+                
+                // If editing CSS, insert as background url
+                if(currentFile.endsWith('.css')) {
+                    insertionCode = `url('${base64Data}')`;
+                }
+                
+                editor.replaceSelection(insertionCode);
+                saveToCloud(); // Save immediately after inserting huge base64
+            };
+            reader.readAsDataURL(file);
+            
+            // Reset input so the same file can be uploaded again if needed
+            uploader.value = '';
+        };
+    }
 }
 
 // Universal Item Creator (Handles deep nesting)
@@ -292,9 +336,11 @@ function renderSidebarTree() {
 // ==========================================
 export function toggleSearch() {
     const searchBar = document.getElementById('floating-search-bar');
-    searchBar.classList.toggle('hidden');
-    if(!searchBar.classList.contains('hidden')) {
-        document.getElementById('findInput').focus();
+    if(searchBar) {
+        searchBar.classList.toggle('hidden');
+        if(!searchBar.classList.contains('hidden')) {
+            document.getElementById('findInput').focus();
+        }
     }
 }
 
@@ -303,6 +349,7 @@ function setupSearchAndButtons() {
     const replaceInput = document.getElementById('replaceInput');
 
     function performSearch(reverse) {
+        if(!findInput) return;
         const query = findInput.value;
         if(!query) return;
         
@@ -321,30 +368,43 @@ function setupSearchAndButtons() {
         }
     }
 
-    document.getElementById('findNext').onclick = () => performSearch(false);
-    document.getElementById('findPrev').onclick = () => performSearch(true);
-    document.getElementById('replaceBtn').onclick = () => {
-        if(searchCursor && searchCursor.from()) {
+    const findNextBtn = document.getElementById('findNext');
+    const findPrevBtn = document.getElementById('findPrev');
+    const replaceBtn = document.getElementById('replaceBtn');
+    const closeSearchBtn = document.getElementById('closeSearchBtn');
+    const searchToggleBtn = document.getElementById('searchToggleBtn');
+    
+    if(findNextBtn) findNextBtn.onclick = () => performSearch(false);
+    if(findPrevBtn) findPrevBtn.onclick = () => performSearch(true);
+    if(replaceBtn) replaceBtn.onclick = () => {
+        if(searchCursor && searchCursor.from() && replaceInput) {
             searchCursor.replace(replaceInput.value);
             performSearch(false);
         }
     };
-    document.getElementById('closeSearchBtn').onclick = toggleSearch;
+    if(closeSearchBtn) closeSearchBtn.onclick = toggleSearch;
+    if(searchToggleBtn) searchToggleBtn.onclick = toggleSearch;
 
-    // Overlay Close
-    document.getElementById('closePreviewBtn').onclick = () => {
-        document.getElementById('fullscreen-preview').classList.add('hidden');
-    };
+    // Preview Window Buttons
+    const closePreviewBtn = document.getElementById('closePreviewBtn');
+    const previewNewWindowBtn = document.getElementById('previewNewWindowBtn');
     
-    // External Run Window
-    document.getElementById('previewNewWindowBtn').onclick = () => {
-        const finalCode = getCompiledCode();
-        const newWindow = window.open('', '_blank');
-        newWindow.document.open();
-        newWindow.document.write(finalCode);
-        newWindow.document.close();
-        newWindow.document.title = "CloudWeaver App";
-    };
+    if(closePreviewBtn) {
+        closePreviewBtn.onclick = () => {
+            document.getElementById('fullscreen-preview').classList.add('hidden');
+        };
+    }
+    
+    if(previewNewWindowBtn) {
+        previewNewWindowBtn.onclick = () => {
+            const finalCode = getCompiledCode();
+            const newWindow = window.open('', '_blank');
+            newWindow.document.open();
+            newWindow.document.write(finalCode);
+            newWindow.document.close();
+            newWindow.document.title = "CloudWeaver App";
+        };
+    }
 }
 
 // ==========================================
@@ -358,31 +418,66 @@ export function format() {
     try {
         if(ext === 'html') editor.setValue(html_beautify(editor.getValue(), { indent_size: 4 }));
         if(ext === 'css') editor.setValue(css_beautify(editor.getValue(), { indent_size: 4 }));
-        if(ext === 'js') editor.setValue(js_beautify(editor.getValue(), { indent_size: 4 }));
-    } catch(e) {}
+        if(ext === 'js' && ext !== 'json') editor.setValue(js_beautify(editor.getValue(), { indent_size: 4 }));
+    } catch(e) {
+        console.error("Formatting error:", e);
+    }
 }
 
 function getCompiledCode() {
-    let htmlCode = fileSystem['index.html'] ? fileSystem['index.html'].content : '<h1>No index.html</h1>';
+    // FOLDER AS AN APP LOGIC
+    // Find out which folder the current file is in to set the root index.html
+    let pathParts = currentFile.split('/');
+    let targetIndex = 'index.html'; // Default to root index.html
     
-    // Inject Eruda
+    if (pathParts.length > 1) {
+        // We are inside a folder. Look for an index.html in THIS folder.
+        let folderPath = pathParts.slice(0, pathParts.length - 1).join('/');
+        let folderIndex = `${folderPath}/index.html`;
+        if (fileSystem[folderIndex]) {
+            targetIndex = folderIndex; // Make THIS folder the App Root
+        }
+    }
+
+    let htmlCode = fileSystem[targetIndex] ? fileSystem[targetIndex].content : `<h1>Error 404</h1><p>No ${targetIndex} found! Please create an index.html file to run this app.</p>`;
+    
+    // Inject Eruda Console
     const erudaScript = `<script src="https://cdn.jsdelivr.net/npm/eruda"><\/script><script>eruda.init();<\/script>`;
     if (htmlCode.includes('</head>')) htmlCode = htmlCode.replace('</head>', erudaScript + '</head>');
     else htmlCode = erudaScript + htmlCode;
 
-    // Combine resources (Handles deep paths dynamically)
+    // Combine resources dynamically based on linked files in the HTML
     Object.keys(fileSystem).forEach(fname => {
-        if(fname.endsWith('.css')) htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']${fname}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
-        if(fname.endsWith('.js')) htmlCode = htmlCode.replace(new RegExp(`<script[^>]*src=["']${fname}["'][^>]*><\\/script>`, 'gi'), `<script>${fileSystem[fname].content}<\/script>`);
+        const shortName = fname.split('/').pop(); // "Folder/style.css" -> "style.css"
+        
+        if(fname.endsWith('.css')) {
+            // Replace <link href="style.css"> with actual styles
+            htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']${shortName}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
+            // Also support absolute paths <link href="Folder/style.css">
+            htmlCode = htmlCode.replace(new RegExp(`<link[^>]*href=["']${fname}["'][^>]*>`, 'gi'), `<style>${fileSystem[fname].content}</style>`);
+        }
+        if(fname.endsWith('.js') && !fname.endsWith('.json')) {
+            // Replace <script src="script.js"> with actual scripts
+            htmlCode = htmlCode.replace(new RegExp(`<script[^>]*src=["']${shortName}["'][^>]*><\\/script>`, 'gi'), `<script>${fileSystem[fname].content}<\/script>`);
+            // Also support absolute paths <script src="Folder/script.js">
+            htmlCode = htmlCode.replace(new RegExp(`<script[^>]*src=["']${fname}["'][^>]*><\\/script>`, 'gi'), `<script>${fileSystem[fname].content}<\/script>`);
+        }
     });
     
     return htmlCode;
 }
 
 export function run() {
-    document.getElementById('fullscreen-preview').classList.remove('hidden');
-    const finalCode = getCompiledCode();
-    const frame = document.getElementById('preview-iframe');
-    const doc = frame.contentDocument || frame.contentWindow.document;
-    doc.open(); doc.write(finalCode); doc.close();
+    const previewContainer = document.getElementById('fullscreen-preview');
+    if(previewContainer) {
+        previewContainer.classList.remove('hidden');
+        const finalCode = getCompiledCode();
+        const frame = document.getElementById('preview-iframe');
+        if(frame) {
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            doc.open(); 
+            doc.write(finalCode); 
+            doc.close();
+        }
+    }
 }
